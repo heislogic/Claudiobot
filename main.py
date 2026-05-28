@@ -75,7 +75,7 @@ class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
         # Avisa o usuário via DM
         try:
             await self.usuario.send(
-                f"❌ Seu alistamento para **{self.classe}** foi recusado.\n"
+                f"❌ Seu alistamento para **Wanted** foi recusado.\n"
                 f"**Motivo:** {self.motivo.value}"
             )
         except discord.Forbidden:
@@ -103,8 +103,8 @@ class ViewStaff(discord.ui.View):
         # Notifica o usuario via DM
         try:
             await self.usuario.send(
-                f"✅ Parabéns! Seu formulario para **{self.classe}** foi aprovado!\n"
-                f"Seu nickname sera alterado para: {self.nickname} e o cargo correspondente sera aplicado em breve."
+                f"✅ Parabéns! Seu formulario para **Wanted** foi aprovado!\n"
+                f"Seu nickname sera alterado para **{self.nickname}** e o cargo **{self.classe}** sera aplicado em breve."
             )
         except discord.Forbidden:
             pass  # DM fechada, ignora
@@ -135,7 +135,7 @@ class ViewFormulario(discord.ui.View):
         await interaction.response.send_modal(FormularioAlistamento())
 
 # --- Comando /formulario ---
-@bot.tree.command(name="formulario", description="Envia a mensagem de alistamento com botão do formulário")
+@bot.tree.command(name="formulario", description="formulario")
 @commands.has_permissions(administrator=True)  # só staff pode usar
 async def formulario(interaction: discord.Interaction):
     embed = discord.Embed(
