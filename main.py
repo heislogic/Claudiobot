@@ -56,6 +56,65 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
                 ephemeral=True
             )
 
+# --- Modal de recusa (pergunta o motivo) ---
+class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
+    motivo = discord.ui.TextInput(
+        label="Motivo",
+        placeholder="Explique o motivo da recusa",
+        required=True,
+        max_length=500
+    )
+
+    def __init__(self, usuario: discord.Member, classe: str):
+        super().__init__()
+        self.usuario = usuario
+        self.classe = classe
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Avisa o usuário via DM
+        try:
+            await self.usuario.send(
+                f"❌ Seu alistamento para **{self.classe}** foi recusado.\n"
+                f"**Motivo:** {self.motivo.value}"
+            )
+        except discord.Forbidden:
+            pass  # DM fechada, ignora
+
+        await interaction.response.send_message(
+            f"Recusado! {self.usuario.mention} foi notificado.",
+            ephemeral=True
+        )
+
+# --- View dos botões de staff ---
+class ViewStaff(discord.ui.View):
+    def __init__(self, usuario: discord.Member, nickname: str, classe: str):
+        super().__init__(timeout=None)
+        self.usuario = usuario
+        self.nickname = nickname
+        self.classe = classe
+
+    @discord.ui.button(label="✅ Aceitar", style=discord.ButtonStyle.green, custom_id="btn_aceitar")
+    async def btn_aceitar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Desabilita os botões após a decisão
+        for child in self.children:
+            child.disabled = True
+        await interaction.message.edit(view=self)
+
+        await interaction.response.send_message(
+            f"✅ {self.usuario.mention} aprovado! Cargo e nickname serão aplicados em breve.",
+            ephemeral=True
+        )
+        # TODO: Etapa 4 - aplicar cargo e nickname aqui
+
+    @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
+    async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalRecusa(self.usuario, self.classe))
+
+        # Desabilita os botões após abrir o modal
+        for child in self.children:
+            child.disabled = True
+        await interaction.message.edit(view=self)
+
 # --- View com o botão ---
 class ViewFormulario(discord.ui.View):
     def __init__(self):
