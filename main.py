@@ -49,12 +49,13 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
             embed.add_field(name="Classe", value=self.classe.value, inline=True)
             embed.set_footer(text=f"ID: {interaction.user.id}")
 
-            await canal_staff.send(embed=embed)
+            view = ViewStaff(interaction.user, self.nickname.value, self.classe.value)
+            await canal_staff.send(embed=embed, view=view)
 
-            await interaction.response.send_message(
-                "✅ Formulário enviado! Aguarde a análise da staff.",
-                ephemeral=True
-            )
+        await interaction.response.send_message(
+            "✅ Formulário enviado! A equipe de staff irá analisar sua inscrição em breve.",
+            ephemeral = True
+        )
 
 # --- Modal de recusa (pergunta o motivo) ---
 class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
@@ -98,13 +99,22 @@ class ViewStaff(discord.ui.View):
         # Desabilita os botões após a decisão
         for child in self.children:
             child.disabled = True
+
+        # Notifica o usuario via DM
+        try:
+            await self.usuario.send(
+                f"✅ Parabéns! Seu formulario para **{self.classe}** foi aprovado!\n"
+                f"Seu nickname sera alterado para: {self.nickname} e o cargo correspondente sera aplicado em breve."
+            )
+        except discord.Forbidden:
+            pass  # DM fechada, ignora
+
         await interaction.message.edit(view=self)
 
         await interaction.response.send_message(
             f"✅ {self.usuario.mention} aprovado! Cargo e nickname serão aplicados em breve.",
             ephemeral=True
         )
-        # TODO: Etapa 4 - aplicar cargo e nickname aqui
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
