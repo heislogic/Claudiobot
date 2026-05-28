@@ -52,8 +52,15 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
             view = ViewStaff(interaction.user, self.nickname.value, self.classe.value)
             await canal_staff.send(embed=embed, view=view)
 
+            # Envia o embed e notifica cargo @staff
+            await canal_staff.send(
+                content=f"<@&{1450345042202853410}> novo formulário enviado por {interaction.user.mention}!",
+                embed=embed,
+                view=view
+            )
+
         await interaction.response.send_message(
-            "✅ Formulário enviado! A equipe de staff irá analisar sua inscrição em breve.",
+            "✅ Formulário enviado! Aguarde a análise da staff.",
             ephemeral = True
         )
 
@@ -99,6 +106,37 @@ class ViewStaff(discord.ui.View):
         # Desabilita os botões após a decisão
         for child in self.children:
             child.disabled = True
+        await interaction.message.edit(view=self)
+
+        # --- Buscar cargo pelo nome da classe ---
+        cargo = discord.utils.get(interaction.guild.roles, name=self.classe.upper())
+
+        if cargo is None:
+            await interaction.response.send_message(
+                f"⚠️ Cargo `{self.classe.upper()}` não encontrado no servidor! Verifique o nome.",
+                ephemeral=True
+            )
+            return
+
+        # --- Adicionar Cargo ---
+        try:
+            await self.usuario.add_roles(cargo)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"⚠️ Não tenho permissão para adicionar o cargo `{cargo.name}` ao usuário {self.usuario.mention}.",
+                ephemeral=True
+            )
+            return
+
+        # --- Alterar Nickname ---
+        try:
+            await self.usuario.edit(nick=self.nickname)
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                f"⚠️ Cargo adicionado, mas não foi possível alterar o nickname (sem permissão).",
+                ephemeral=True
+            )
+            return
 
         # Notifica o usuario via DM
         try:
@@ -144,6 +182,5 @@ async def formulario(interaction: discord.Interaction):
         color=discord.Color.blue()
     )
     await interaction.channel.send(embed=embed, view=ViewFormulario())
-    await interaction.response.send_message("Formulário enviado!", ephemeral=True)
 
 bot.run(TOKEN)
