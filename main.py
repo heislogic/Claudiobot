@@ -17,7 +17,7 @@ CATEGORIAS_POR_CLASSE = {
     "TANK": 1510032314854408282
 }
 
-# Mapeamento de classe para emoji unicode (usado no nome do canal e embed)
+# Mapeamento de classe para emoji unicode
 EMOJIS_POR_CLASSE = {
     "DPS": "🔪",
     "HEALER": "🚑",
@@ -45,7 +45,7 @@ async def on_ready():
     except Exception as e:
         print(f"Erro ao sincronizar: {e}")
 
-    # --- Recuperar formulários pendentes ---
+    # Recuperar formulários pendentes
     pendentes = data_manager.listar_formularios_pendentes()
     for key, dados in pendentes.items():
         channel = bot.get_channel(dados["channel_id"])
@@ -59,14 +59,13 @@ async def on_ready():
                     bot.add_view(view, message_id=mensagem.id)
                     await mensagem.edit(view=view)
                 else:
-                    # Usuário não está mais no servidor, remover pendência
                     data_manager.remover_formulario_pendente(dados["message_id"], dados["channel_id"])
             except discord.NotFound:
                 data_manager.remover_formulario_pendente(dados["message_id"], dados["channel_id"])
             except Exception as e:
                 print(f"Erro ao restaurar formulário {key}: {e}")
 
-    # --- Recuperar tickets ativos ---
+    # Recuperar tickets ativos
     tickets = data_manager.listar_tickets_ativos()
     for key, dados in tickets.items():
         channel = bot.get_channel(dados["channel_id"])
@@ -80,7 +79,6 @@ async def on_ready():
                     bot.add_view(view, message_id=mensagem.id)
                     await mensagem.edit(view=view)
                 else:
-                    # Dono não está mais no servidor, remover ticket
                     data_manager.remover_ticket_ativo(dados["channel_id"], dados["dono_id"])
             except discord.NotFound:
                 data_manager.remover_ticket_ativo(dados["channel_id"], dados["dono_id"])
@@ -93,7 +91,6 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
     classe = discord.ui.TextInput(label="Classe", placeholder="Ex: DPS, TANK, HEALER", required=True, max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Impedir que já membros enviem novo formulário
         cargos_membro = [role.name.upper() for role in interaction.user.roles]
         classes_validas = ["DPS", "HEALER", "TANK"]
         cargo_existente = any(classe in cargos_membro for classe in classes_validas)
@@ -118,7 +115,6 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
                 embed=embed,
                 view=view
             )
-            # Salvar no JSON
             data_manager.adicionar_formulario_pendente(
                 message_id=msg.id,
                 channel_id=CANAL_STAFF_ID,
@@ -144,7 +140,6 @@ class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
             )
         except discord.Forbidden:
             pass
-        # Remover do JSON
         data_manager.remover_formulario_pendente(self.message_id, self.channel_id)
         await interaction.response.send_message(f"Recusado! {self.usuario.mention} foi notificado.", ephemeral=True)
 
@@ -179,7 +174,6 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
             await interaction.followup.send(f"⚠️ Erro ao deletar: {str(e)}", ephemeral=True)
             return
 
-        # Remover do JSON
         data_manager.remover_ticket_ativo(self.canal.id, self.dono.id)
 
         try:
@@ -196,7 +190,7 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
 
         await interaction.followup.send("✅ Canal deletado com sucesso!", ephemeral=True)
 
-# --- View do botão de deletar canal (dentro do ticket) ---
+# --- View do botão de deletar canal (apenas staff) ---
 class ViewDeletarTicket(discord.ui.View):
     def __init__(self, canal: discord.TextChannel, dono: discord.Member):
         super().__init__(timeout=None)
@@ -207,9 +201,12 @@ class ViewDeletarTicket(discord.ui.View):
     async def btn_deletar(self, interaction: discord.Interaction, button: discord.ui.Button):
         staff_role = interaction.guild.get_role(CARGO_STAFF_ID)
         is_staff = staff_role in interaction.user.roles if staff_role else False
-        if interaction.user.id != self.dono.id and not is_staff:
-            await interaction.response.send_message("❌ Você não tem permissão para deletar este canal.", ephemeral=True)
+
+        # APENAS STAFF PODE FECHAR
+        if not is_staff:
+            await interaction.response.send_message("❌ Apenas staff pode fechar este ticket.", ephemeral=True)
             return
+
         await interaction.response.send_modal(ModalConfirmarDelete(self.canal, self.dono))
 
 # --- View dos botões de staff (aceitar/recusar formulário) ---
@@ -223,12 +220,10 @@ class ViewStaff(discord.ui.View):
     @discord.ui.button(label="✅ Aceitar", style=discord.ButtonStyle.green, custom_id="btn_aceitar")
     async def btn_aceitar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        # Desabilita botões
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
 
-        # Remover formulário pendente do JSON
         data_manager.remover_formulario_pendente(interaction.message.id, interaction.channel_id)
 
         cargo = discord.utils.get(interaction.guild.roles, name=self.classe.upper())
@@ -245,7 +240,6 @@ class ViewStaff(discord.ui.View):
         except discord.Forbidden:
             await interaction.followup.send(f"⚠️ Cargo adicionado, mas sem permissão para alterar o nickname.", ephemeral=True)
 
-        # --- CRIAÇÃO DO CANAL ---
         try:
             classe_normalizada = self.classe.strip().upper()
             categoria_id = CATEGORIAS_POR_CLASSE.get(classe_normalizada)
@@ -274,7 +268,6 @@ class ViewStaff(discord.ui.View):
             nome_sanitizado = nome_sanitizado.replace(' ', '-')
             nome_canal = f"{emoji}・{nome_sanitizado}"
 
-            # Verifica duplicidade
             for canal_existente in interaction.guild.text_channels:
                 if canal_existente.name == nome_canal and canal_existente.category_id == categoria_id:
                     await interaction.followup.send(
@@ -320,7 +313,6 @@ class ViewStaff(discord.ui.View):
             view_deletar = ViewDeletarTicket(canal_privado, self.usuario)
             msg_boas_vindas = await canal_privado.send(embed=embed_canal, view=view_deletar)
 
-            # Salvar ticket ativo no JSON
             data_manager.adicionar_ticket_ativo(
                 channel_id=canal_privado.id,
                 dono_id=self.usuario.id,
