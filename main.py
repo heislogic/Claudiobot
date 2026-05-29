@@ -2,6 +2,7 @@ import os
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+import data_manager
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -44,13 +45,55 @@ async def on_ready():
     except Exception as e:
         print(f"Erro ao sincronizar: {e}")
 
+    # --- Recuperar formulários pendentes ---
+    pendentes = data_manager.listar_formularios_pendentes()
+    for key, dados in pendentes.items():
+        channel = bot.get_channel(dados["channel_id"])
+        if channel:
+            try:
+                mensagem = await channel.fetch_message(dados["message_id"])
+                guild = channel.guild
+                usuario = guild.get_member(dados["user_id"])
+                if usuario:
+                    view = ViewStaff(usuario, dados["nickname"], dados["classe"])
+                    bot.add_view(view, message_id=mensagem.id)
+                    await mensagem.edit(view=view)
+                else:
+                    # Usuário não está mais no servidor, remover pendência
+                    data_manager.remover_formulario_pendente(dados["message_id"], dados["channel_id"])
+            except discord.NotFound:
+                data_manager.remover_formulario_pendente(dados["message_id"], dados["channel_id"])
+            except Exception as e:
+                print(f"Erro ao restaurar formulário {key}: {e}")
+
+    # --- Recuperar tickets ativos ---
+    tickets = data_manager.listar_tickets_ativos()
+    for key, dados in tickets.items():
+        channel = bot.get_channel(dados["channel_id"])
+        if channel:
+            try:
+                mensagem = await channel.fetch_message(dados["message_id"])
+                guild = channel.guild
+                dono = guild.get_member(dados["dono_id"])
+                if dono:
+                    view = ViewDeletarTicket(channel, dono)
+                    bot.add_view(view, message_id=mensagem.id)
+                    await mensagem.edit(view=view)
+                else:
+                    # Dono não está mais no servidor, remover ticket
+                    data_manager.remover_ticket_ativo(dados["channel_id"], dados["dono_id"])
+            except discord.NotFound:
+                data_manager.remover_ticket_ativo(dados["channel_id"], dados["dono_id"])
+            except Exception as e:
+                print(f"Erro ao restaurar ticket {key}: {e}")
+
 # --- Modal do formulário ---
 class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário 🥷"):
     nickname = discord.ui.TextInput(label="Nickname", placeholder="Seu nickname in-game", required=True, max_length=32)
     classe = discord.ui.TextInput(label="Classe", placeholder="Ex: DPS, TANK, HEALER", required=True, max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Verifica se o usuário já possui algum cargo das classes (DPS, HEALER, TANK)
+        # Impedir que já membros enviem novo formulário
         cargos_membro = [role.name.upper() for role in interaction.user.roles]
         classes_validas = ["DPS", "HEALER", "TANK"]
         cargo_existente = any(classe in cargos_membro for classe in classes_validas)
@@ -70,19 +113,29 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
             embed.add_field(name="Classe", value=self.classe.value, inline=True)
             embed.set_footer(text=f"ID: {interaction.user.id}")
             view = ViewStaff(interaction.user, self.nickname.value, self.classe.value)
-            await canal_staff.send(
+            msg = await canal_staff.send(
                 content=f"<@&{CARGO_STAFF_ID}> novo formulário enviado por {interaction.user.mention}!",
                 embed=embed,
                 view=view
+            )
+            # Salvar no JSON
+            data_manager.adicionar_formulario_pendente(
+                message_id=msg.id,
+                channel_id=CANAL_STAFF_ID,
+                user_id=interaction.user.id,
+                nickname=self.nickname.value,
+                classe=self.classe.value
             )
         await interaction.response.send_message("✅ Formulário enviado! Aguarde a análise da staff.", ephemeral=True)
 
 # --- Modal de recusa ---
 class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
     motivo = discord.ui.TextInput(label="Motivo", placeholder="Explique o motivo da recusa", required=True, max_length=500)
-    def __init__(self, usuario: discord.Member):
+    def __init__(self, usuario: discord.Member, message_id: int, channel_id: int):
         super().__init__()
         self.usuario = usuario
+        self.message_id = message_id
+        self.channel_id = channel_id
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -91,6 +144,8 @@ class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
             )
         except discord.Forbidden:
             pass
+        # Remover do JSON
+        data_manager.remover_formulario_pendente(self.message_id, self.channel_id)
         await interaction.response.send_message(f"Recusado! {self.usuario.mention} foi notificado.", ephemeral=True)
 
 # --- Modal de confirmação para deletar canal ---
@@ -124,13 +179,14 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
             await interaction.followup.send(f"⚠️ Erro ao deletar: {str(e)}", ephemeral=True)
             return
 
-        # Notifica o dono via DM
+        # Remover do JSON
+        data_manager.remover_ticket_ativo(self.canal.id, self.dono.id)
+
         try:
             await self.dono.send(f"🗑️ Seu canal `{nome_canal}` foi deletado por {interaction.user.mention}.")
         except discord.Forbidden:
             pass
 
-        # Notifica a staff
         canal_staff = interaction.guild.get_channel(CANAL_STAFF_ID)
         if canal_staff:
             try:
@@ -167,9 +223,13 @@ class ViewStaff(discord.ui.View):
     @discord.ui.button(label="✅ Aceitar", style=discord.ButtonStyle.green, custom_id="btn_aceitar")
     async def btn_aceitar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
+        # Desabilita botões
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
+
+        # Remover formulário pendente do JSON
+        data_manager.remover_formulario_pendente(interaction.message.id, interaction.channel_id)
 
         cargo = discord.utils.get(interaction.guild.roles, name=self.classe.upper())
         if cargo is None:
@@ -185,7 +245,7 @@ class ViewStaff(discord.ui.View):
         except discord.Forbidden:
             await interaction.followup.send(f"⚠️ Cargo adicionado, mas sem permissão para alterar o nickname.", ephemeral=True)
 
-        # --- CRIAÇÃO DO CANAL NA CATEGORIA CORRESPONDENTE À CLASSE COM EMOJI E BUILD LEADER ---
+        # --- CRIAÇÃO DO CANAL ---
         try:
             classe_normalizada = self.classe.strip().upper()
             categoria_id = CATEGORIAS_POR_CLASSE.get(classe_normalizada)
@@ -205,9 +265,7 @@ class ViewStaff(discord.ui.View):
                 )
                 return
 
-            # Obtém o emoji correspondente
             emoji = EMOJIS_POR_CLASSE.get(classe_normalizada, "📁")
-            # Obtém o role do Build Leader para esta classe
             build_leader_role_id = BUILD_LEADER_POR_CLASSE.get(classe_normalizada)
             build_leader_role = interaction.guild.get_role(build_leader_role_id) if build_leader_role_id else None
             staff_role = interaction.guild.get_role(CARGO_STAFF_ID)
@@ -216,17 +274,15 @@ class ViewStaff(discord.ui.View):
             nome_sanitizado = nome_sanitizado.replace(' ', '-')
             nome_canal = f"{emoji}・{nome_sanitizado}"
 
-            # Verifica se já existe canal com o mesmo nome na mesma categoria
-            canais_existentes = interaction.guild.text_channels
-            for canal_existente in canais_existentes:
+            # Verifica duplicidade
+            for canal_existente in interaction.guild.text_channels:
                 if canal_existente.name == nome_canal and canal_existente.category_id == categoria_id:
                     await interaction.followup.send(
-                        f"⚠️ Já existe um canal com o nome `{nome_canal}` nesta categoria. Canal não criado.",
+                        f"⚠️ Já existe um canal com o nome `{nome_canal}` nesta categoria.",
                         ephemeral=True
                     )
                     return
 
-            # Monta permissões
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
                 self.usuario: discord.PermissionOverwrite(
@@ -262,7 +318,14 @@ class ViewStaff(discord.ui.View):
                 color=discord.Color.green()
             )
             view_deletar = ViewDeletarTicket(canal_privado, self.usuario)
-            await canal_privado.send(embed=embed_canal, view=view_deletar)
+            msg_boas_vindas = await canal_privado.send(embed=embed_canal, view=view_deletar)
+
+            # Salvar ticket ativo no JSON
+            data_manager.adicionar_ticket_ativo(
+                channel_id=canal_privado.id,
+                dono_id=self.usuario.id,
+                message_id=msg_boas_vindas.id
+            )
 
             try:
                 await self.usuario.send(f"✅ Seu canal de build foi criado na categoria {categoria.name}: {canal_privado.mention}")
@@ -279,7 +342,7 @@ class ViewStaff(discord.ui.View):
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalRecusa(self.usuario))
+        await interaction.response.send_modal(ModalRecusa(self.usuario, interaction.message.id, interaction.channel_id))
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
