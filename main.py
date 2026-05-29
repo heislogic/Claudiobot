@@ -7,8 +7,28 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 CANAL_STAFF_ID = 1509687523268493510
-CATEGORIA_MEMBROS_ID = 1450345042668556295
 CARGO_STAFF_ID = 1450345042202853408
+
+# Mapeamento de classe para ID da categoria
+CATEGORIAS_POR_CLASSE = {
+    "DPS": 1510032279865655387,
+    "HEALER": 1510032296680362034,
+    "TANK": 1510032314854408282
+}
+
+# Mapeamento de classe para emoji unicode (usado no nome do canal e embed)
+EMOJIS_POR_CLASSE = {
+    "DPS": "🔪",
+    "HEALER": "🚑",
+    "TANK": "🔰"
+}
+
+# Mapeamento de classe para ID do cargo de Build Leader
+BUILD_LEADER_POR_CLASSE = {
+    "DPS": 1510042154947313724,
+    "HEALER": 1510042369406402580,
+    "TANK": 1510042326125248534
+}
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -72,12 +92,9 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
         if self.confirmacao.value != "CONFIRMAR":
             await interaction.response.send_message("❌ Exclusão cancelada: você não digitou CONFIRMAR corretamente.", ephemeral=True)
             return
-        # Defer pois deletar canal pode demorar
         await interaction.response.defer(ephemeral=True)
-        # Salva informações antes de deletar
         nome_canal = self.canal.name
         dono = self.dono
-        # Deleta o canal
         try:
             await self.canal.delete()
         except discord.Forbidden:
@@ -86,12 +103,10 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
         except Exception as e:
             await interaction.followup.send(f"⚠️ Erro ao deletar: {str(e)}", ephemeral=True)
             return
-        # Notifica o dono via DM
         try:
             await dono.send(f"🗑️ Seu canal `{nome_canal}` foi deletado por {interaction.user.mention}.")
         except:
             pass
-        # Notifica a staff (opcional)
         canal_staff = interaction.guild.get_channel(CANAL_STAFF_ID)
         if canal_staff:
             await canal_staff.send(f"🗑️ Canal `{nome_canal}` deletado por {interaction.user.mention} (dono: {dono.mention})")
@@ -106,13 +121,11 @@ class ViewDeletarTicket(discord.ui.View):
 
     @discord.ui.button(label="🗑️ Fechar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_deletar_ticket")
     async def btn_deletar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Verifica permissão: dono ou staff (cargo staff)
         staff_role = interaction.guild.get_role(CARGO_STAFF_ID)
         is_staff = staff_role in interaction.user.roles
         if interaction.user.id != self.dono.id and not is_staff:
             await interaction.response.send_message("❌ Você não tem permissão para deletar este canal.", ephemeral=True)
             return
-        # Abre modal de confirmação
         await interaction.response.send_modal(ModalConfirmarDelete(self.canal, self.dono))
 
 # --- View dos botões de staff (aceitar/recusar formulário) ---
@@ -144,34 +157,59 @@ class ViewStaff(discord.ui.View):
         except discord.Forbidden:
             await interaction.followup.send(f"⚠️ Cargo adicionado, mas sem permissão para alterar o nickname.", ephemeral=True)
 
-        # Criação do canal privado
+        # --- CRIAÇÃO DO CANAL NA CATEGORIA CORRESPONDENTE À CLASSE COM EMOJI E BUILD LEADER ---
         try:
-            categoria = interaction.guild.get_channel(CATEGORIA_MEMBROS_ID)
+            classe_normalizada = self.classe.strip().upper()
+            categoria_id = CATEGORIAS_POR_CLASSE.get(classe_normalizada)
+            if not categoria_id:
+                await interaction.followup.send(
+                    f"⚠️ Classe `{self.classe}` inválida. Categorias disponíveis: DPS, HEALER, TANK.\n"
+                    f"Cargo e nickname aplicados, mas canal NÃO criado.",
+                    ephemeral=True
+                )
+                return
+
+            categoria = interaction.guild.get_channel(categoria_id)
             if not categoria:
-                raise Exception("Categoria não encontrada.")
+                await interaction.followup.send(
+                    f"⚠️ Categoria ID {categoria_id} para classe {classe_normalizada} não encontrada.",
+                    ephemeral=True
+                )
+                return
+
+            # Obtém o emoji correspondente
+            emoji = EMOJIS_POR_CLASSE.get(classe_normalizada, "📁")
+            # Obtém o role do Build Leader para esta classe
+            build_leader_role_id = BUILD_LEADER_POR_CLASSE.get(classe_normalizada)
+            build_leader_role = interaction.guild.get_role(build_leader_role_id) if build_leader_role_id else None
+
             nome_sanitizado = ''.join(c if c.isalnum() or c == '-' else '-' for c in self.nickname.lower())
             nome_sanitizado = nome_sanitizado.replace(' ', '-')
-            nome_canal = f"{self.classe.lower()}-{nome_sanitizado}"
+            nome_canal = f"{emoji}-build-{nome_sanitizado}"
+
+            # Monta permissões
+            overwrites = {
+                interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                self.usuario: discord.PermissionOverwrite(
+                    read_messages=True, send_messages=True, read_message_history=True, attach_files=True
+                ),
+                interaction.guild.me: discord.PermissionOverwrite(
+                    read_messages=True, send_messages=True, manage_channels=True
+                )
+            }
+            if build_leader_role:
+                overwrites[build_leader_role] = discord.PermissionOverwrite(
+                    read_messages=True, send_messages=True, read_message_history=True, attach_files=True
+                )
 
             canal_privado = await interaction.guild.create_text_channel(
                 name=nome_canal,
                 category=categoria,
-                overwrites={
-                    interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                    self.usuario: discord.PermissionOverwrite(
-                        read_messages=True, send_messages=True, read_message_history=True, attach_files=True
-                    ),
-                    interaction.guild.get_role(CARGO_STAFF_ID): discord.PermissionOverwrite(
-                        read_messages=True, send_messages=True, read_message_history=True, manage_channels=True
-                    ),
-                    interaction.guild.me: discord.PermissionOverwrite(
-                        read_messages=True, send_messages=True, manage_channels=True
-                    )
-                }
+                overwrites=overwrites
             )
 
             embed_canal = discord.Embed(
-                title="📁 Canal de Build",
+                title=f"{emoji} Canal de Build - {self.nickname}",
                 description=(
                     f"Bem-vindo(a) {self.usuario.mention}!\n\n"
                     "Este canal é destinado à **análise de builds** pelos nossos especialistas.\n"
@@ -180,14 +218,15 @@ class ViewStaff(discord.ui.View):
                 ),
                 color=discord.Color.green()
             )
-            # Envia a mensagem de boas-vindas COM o botão de deletar
             view_deletar = ViewDeletarTicket(canal_privado, self.usuario)
             await canal_privado.send(embed=embed_canal, view=view_deletar)
-
-            await self.usuario.send(f"✅ Seu canal de build foi criado: {canal_privado.mention}")
+            await self.usuario.send(f"✅ Seu canal de build foi criado na categoria {categoria.name}: {canal_privado.mention}")
 
         except Exception as e:
-            await interaction.followup.send(f"⚠️ Cargo e nickname aplicados, mas erro ao criar canal: {str(e)}", ephemeral=True)
+            await interaction.followup.send(
+                f"⚠️ Cargo e nickname aplicados, mas erro ao criar canal: {str(e)}",
+                ephemeral=True
+            )
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
