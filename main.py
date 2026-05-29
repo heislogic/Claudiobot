@@ -50,6 +50,18 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
     classe = discord.ui.TextInput(label="Classe", placeholder="Ex: DPS, TANK, HEALER", required=True, max_length=6)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # Verifica se o usuário já possui algum cargo das classes (DPS, HEALER, TANK)
+        cargos_membro = [role.name.upper() for role in interaction.user.roles]
+        classes_validas = ["DPS", "HEALER", "TANK"]
+        cargo_existente = any(classe in cargos_membro for classe in classes_validas)
+
+        if cargo_existente:
+            await interaction.response.send_message(
+                "❌ Você já é membro da guilda e não pode enviar um novo formulário.",
+                ephemeral=True
+            )
+            return
+
         canal_staff = interaction.client.get_channel(CANAL_STAFF_ID)
         if canal_staff:
             embed = discord.Embed(title="📋 Formulário enviado", color=discord.Color.orange())
@@ -58,19 +70,25 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
             embed.add_field(name="Classe", value=self.classe.value, inline=True)
             embed.set_footer(text=f"ID: {interaction.user.id}")
             view = ViewStaff(interaction.user, self.nickname.value, self.classe.value)
-            await canal_staff.send(content=f"<@&{CARGO_STAFF_ID}> novo formulário enviado por {interaction.user.mention}!", embed=embed, view=view)
+            await canal_staff.send(
+                content=f"<@&{CARGO_STAFF_ID}> novo formulário enviado por {interaction.user.mention}!",
+                embed=embed,
+                view=view
+            )
         await interaction.response.send_message("✅ Formulário enviado! Aguarde a análise da staff.", ephemeral=True)
 
 # --- Modal de recusa ---
 class ModalRecusa(discord.ui.Modal, title="❌ Formulário Recusado ❌"):
     motivo = discord.ui.TextInput(label="Motivo", placeholder="Explique o motivo da recusa", required=True, max_length=500)
-    def __init__(self, usuario: discord.Member, classe: str):
+    def __init__(self, usuario: discord.Member):
         super().__init__()
         self.usuario = usuario
-        self.classe = classe
+
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            await self.usuario.send(f"❌ Seu alistamento para **Wanted** foi recusado.\n**Motivo:** {self.motivo.value}")
+            await self.usuario.send(
+                f"❌ Seu alistamento para **Wanted** foi recusado.\n**Motivo:** {self.motivo.value}"
+            )
         except discord.Forbidden:
             pass
         await interaction.response.send_message(f"Recusado! {self.usuario.mention} foi notificado.", ephemeral=True)
@@ -94,22 +112,32 @@ class ModalConfirmarDelete(discord.ui.Modal, title="🗑️ Confirmar exclusão 
             return
         await interaction.response.defer(ephemeral=True)
         nome_canal = self.canal.name
-        dono = self.dono
         try:
             await self.canal.delete()
         except discord.Forbidden:
             await interaction.followup.send("⚠️ Sem permissão para deletar este canal.", ephemeral=True)
             return
+        except discord.NotFound:
+            await interaction.followup.send("⚠️ Canal já foi deletado.", ephemeral=True)
+            return
         except Exception as e:
             await interaction.followup.send(f"⚠️ Erro ao deletar: {str(e)}", ephemeral=True)
             return
+
+        # Notifica o dono via DM
         try:
-            await dono.send(f"🗑️ Seu canal `{nome_canal}` foi deletado por {interaction.user.mention}.")
-        except:
+            await self.dono.send(f"🗑️ Seu canal `{nome_canal}` foi deletado por {interaction.user.mention}.")
+        except discord.Forbidden:
             pass
+
+        # Notifica a staff
         canal_staff = interaction.guild.get_channel(CANAL_STAFF_ID)
         if canal_staff:
-            await canal_staff.send(f"🗑️ Canal `{nome_canal}` deletado por {interaction.user.mention} (dono: {dono.mention})")
+            try:
+                await canal_staff.send(f"🗑️ Canal `{nome_canal}` deletado por {interaction.user.mention} (dono: {self.dono.mention})")
+            except:
+                pass
+
         await interaction.followup.send("✅ Canal deletado com sucesso!", ephemeral=True)
 
 # --- View do botão de deletar canal (dentro do ticket) ---
@@ -122,7 +150,7 @@ class ViewDeletarTicket(discord.ui.View):
     @discord.ui.button(label="🗑️ Fechar Ticket", style=discord.ButtonStyle.danger, custom_id="btn_deletar_ticket")
     async def btn_deletar(self, interaction: discord.Interaction, button: discord.ui.Button):
         staff_role = interaction.guild.get_role(CARGO_STAFF_ID)
-        is_staff = staff_role in interaction.user.roles
+        is_staff = staff_role in interaction.user.roles if staff_role else False
         if interaction.user.id != self.dono.id and not is_staff:
             await interaction.response.send_message("❌ Você não tem permissão para deletar este canal.", ephemeral=True)
             return
@@ -182,10 +210,21 @@ class ViewStaff(discord.ui.View):
             # Obtém o role do Build Leader para esta classe
             build_leader_role_id = BUILD_LEADER_POR_CLASSE.get(classe_normalizada)
             build_leader_role = interaction.guild.get_role(build_leader_role_id) if build_leader_role_id else None
+            staff_role = interaction.guild.get_role(CARGO_STAFF_ID)
 
             nome_sanitizado = ''.join(c if c.isalnum() or c == '-' else '-' for c in self.nickname.lower())
             nome_sanitizado = nome_sanitizado.replace(' ', '-')
-            nome_canal = f"{emoji}-build-{nome_sanitizado}"
+            nome_canal = f"{emoji}・{nome_sanitizado}"
+
+            # Verifica se já existe canal com o mesmo nome na mesma categoria
+            canais_existentes = interaction.guild.text_channels
+            for canal_existente in canais_existentes:
+                if canal_existente.name == nome_canal and canal_existente.category_id == categoria_id:
+                    await interaction.followup.send(
+                        f"⚠️ Já existe um canal com o nome `{nome_canal}` nesta categoria. Canal não criado.",
+                        ephemeral=True
+                    )
+                    return
 
             # Monta permissões
             overwrites = {
@@ -200,6 +239,10 @@ class ViewStaff(discord.ui.View):
             if build_leader_role:
                 overwrites[build_leader_role] = discord.PermissionOverwrite(
                     read_messages=True, send_messages=True, read_message_history=True, attach_files=True
+                )
+            if staff_role:
+                overwrites[staff_role] = discord.PermissionOverwrite(
+                    read_messages=True, send_messages=True, read_message_history=True, manage_channels=True
                 )
 
             canal_privado = await interaction.guild.create_text_channel(
@@ -220,8 +263,14 @@ class ViewStaff(discord.ui.View):
             )
             view_deletar = ViewDeletarTicket(canal_privado, self.usuario)
             await canal_privado.send(embed=embed_canal, view=view_deletar)
-            await self.usuario.send(f"✅ Seu canal de build foi criado na categoria {categoria.name}: {canal_privado.mention}")
 
+            try:
+                await self.usuario.send(f"✅ Seu canal de build foi criado na categoria {categoria.name}: {canal_privado.mention}")
+            except discord.Forbidden:
+                pass
+
+        except discord.Forbidden:
+            await interaction.followup.send("⚠️ Sem permissão para criar canal. Verifique as permissões do bot.", ephemeral=True)
         except Exception as e:
             await interaction.followup.send(
                 f"⚠️ Cargo e nickname aplicados, mas erro ao criar canal: {str(e)}",
@@ -230,7 +279,7 @@ class ViewStaff(discord.ui.View):
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalRecusa(self.usuario, self.classe))
+        await interaction.response.send_modal(ModalRecusa(self.usuario))
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
