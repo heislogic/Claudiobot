@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
+# IDs dos canais e cargos
 CANAL_STAFF_ID = 1509687523268493510
+CATEGORIA_MEMBROS_ID = 1450345042668556295   # ID da categoria onde os canais serão criados
+CARGO_STAFF_ID = 1450345042202853408         # ID do cargo da staff que terá acesso aos canais
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -51,7 +54,7 @@ class FormularioAlistamento(discord.ui.Modal, title="🥷 Wanted Formulário �
 
             view = ViewStaff(interaction.user, self.nickname.value, self.classe.value)
             await canal_staff.send(
-                content=f"<@&1450345042202853410> novo formulário enviado por {interaction.user.mention}!",
+                content=f"<@&{CARGO_STAFF_ID}> novo formulário enviado por {interaction.user.mention}!",
                 embed=embed,
                 view=view
             )
@@ -99,46 +102,89 @@ class ViewStaff(discord.ui.View):
 
     @discord.ui.button(label="✅ Aceitar", style=discord.ButtonStyle.green, custom_id="btn_aceitar")
     async def btn_aceitar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()  # Defer para ações longas
+
+        # Desabilita os botões para evitar duplicidade
         for child in self.children:
             child.disabled = True
         await interaction.message.edit(view=self)
 
+        # Aplica o cargo baseado na classe
         cargo = discord.utils.get(interaction.guild.roles, name=self.classe.upper())
-
         if cargo is None:
-            await interaction.response.send_message(
-                f"⚠️ Cargo `{self.classe.upper()}` não encontrado!",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"⚠️ Cargo `{self.classe.upper()}` não encontrado!", ephemeral=True)
             return
 
         try:
             await self.usuario.add_roles(cargo)
         except discord.Forbidden:
-            await interaction.response.send_message(
-                f"⚠️ Sem permissão para adicionar o cargo `{cargo.name}`.",
-                ephemeral=True
-            )
+            await interaction.followup.send(f"⚠️ Sem permissão para adicionar o cargo `{cargo.name}`.", ephemeral=True)
             return
 
+        # Altera o nickname do usuário
         try:
             await self.usuario.edit(nick=self.nickname)
         except discord.Forbidden:
-            await interaction.response.send_message(
-                f"⚠️ Cargo adicionado, mas sem permissão para alterar o nickname.",
+            await interaction.followup.send(f"⚠️ Cargo adicionado, mas sem permissão para alterar o nickname.", ephemeral=True)
+
+        # --- CRIAÇÃO DO CANAL PRIVADO (build-{nickname}) ---
+        try:
+            categoria = interaction.guild.get_channel(CATEGORIA_MEMBROS_ID)
+            if not categoria:
+                raise Exception("Categoria não encontrada. Verifique o ID.")
+
+            # Sanitiza o nickname para nome do canal (apenas letras, números e hífen)
+            nome_sanitizado = ''.join(c if c.isalnum() or c == '-' else '-' for c in self.nickname.lower())
+            nome_sanitizado = nome_sanitizado.replace(' ', '-')
+            nome_canal = f"build-{nome_sanitizado}"
+
+            # Cria o canal com as permissões adequadas
+            canal_privado = await interaction.guild.create_text_channel(
+                name=nome_canal,
+                category=categoria,
+                overwrites={
+                    interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    self.usuario: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        attach_files=True
+                    ),
+                    interaction.guild.get_role(CARGO_STAFF_ID): discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        manage_channels=True
+                    ),
+                    interaction.guild.me: discord.PermissionOverwrite(
+                        read_messages=True,
+                        send_messages=True,
+                        manage_channels=True
+                    )
+                }
+            )
+
+            # Mensagem de boas-vindas com foco em análise de builds
+            embed_canal = discord.Embed(
+                title="📁 Canal de Build",
+                description=(
+                    f"Bem-vindo(a) {self.usuario.mention}!\n\n"
+                    "Este canal é destinado à **análise de builds** pelos nossos Build Leaders.\n"
+                    "Envie aqui sua build completa, talentos e dúvidas.\n\n"
+                    "Staff e BL's irão te auxiliar para otimizar seu personagem."
+                ),
+                color=discord.Color.green()
+            )
+            await canal_privado.send(embed=embed_canal)
+
+            # Notifica o usuário no privado (opcional)
+            await self.usuario.send(f"✅ Seu canal de build foi criado: {canal_privado.mention}")
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"⚠️ Cargo e nickname aplicados, mas ocorreu erro ao criar o canal: {str(e)}",
                 ephemeral=True
             )
-            return
-
-        try:
-            await self.usuario.send(
-                f"✅ Parabéns! Seu formulario para **Wanted** foi aprovado!\n"
-                f"Nickname alterado para **{self.nickname}** e cargo **{self.classe}** aplicado."
-            )
-        except discord.Forbidden:
-            pass
-
-        await interaction.response.defer()
 
     @discord.ui.button(label="❌ Recusar", style=discord.ButtonStyle.red, custom_id="btn_recusar")
     async def btn_recusar(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -147,7 +193,7 @@ class ViewStaff(discord.ui.View):
             child.disabled = True
         await interaction.message.edit(view=self)
 
-# --- View com o botão ---
+# --- View com o botão para abrir formulário ---
 class ViewFormulario(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
