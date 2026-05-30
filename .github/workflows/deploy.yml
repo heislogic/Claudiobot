@@ -1,0 +1,22 @@
+name: Deploy to Discloud
+
+on:
+  push:
+    branches: [ main ]   # main
+  workflow_dispatch:     # Permite execução manual
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout do código
+      uses: actions/checkout@v4
+
+    - name: Fazer deploy na Discloud
+      uses: discloud/deploy-action@v1
+      with:
+        token: ${{ secrets.DISCLOUD_TOKEN }}
