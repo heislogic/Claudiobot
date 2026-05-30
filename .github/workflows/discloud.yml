@@ -5,21 +5,25 @@ on:
     branches:
       - main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
       - name: Pegando o codigo do GitHub
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Configurando o Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v4.1.0
         with:
-          node-size: 20
+          node-version: 24
 
       - name: Instalando a Discloud CLI
-        run: npm install -g @discloud/cli
+
+        run: npm install -g discloud
 
       - name: Enviando para a Discloud
         run: discloud commit -t ${{ secrets.DISCLOUD_TOKEN }}
