@@ -1,0 +1,19 @@
+name: Deploy Automatico Discloud
+
+on:
+  push:
+    branches:
+      - main # Se a sua branch principal se chamar 'master', mude aqui para master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Pegando o codigo do GitHub
+        uses: actions/checkout@v4
+
+      - name: Enviando para a Discloud
+        uses: discloud/action-deploy@v2
+        with:
+          token: ${{ secrets.DISCLOUD_TOKEN }}
