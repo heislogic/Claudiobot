@@ -22,7 +22,6 @@ jobs:
           node-version: 24
 
       - name: Instalando a Discloud CLI
-
         run: npm install -g discloud
 
       - name: Enviando para a Discloud
