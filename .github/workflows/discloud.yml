@@ -3,7 +3,7 @@ name: Deploy Automatico Discloud
 on:
   push:
     branches:
-      - main # Ajuste para 'master' se for o caso
+      - main
 
 jobs:
   deploy:
@@ -13,8 +13,13 @@ jobs:
       - name: Pegando o codigo do GitHub
         uses: actions/checkout@v4
 
-      - name: Enviando para a Discloud
-        # ATUALIZADO: Discloud
-        uses: discloudbot/action-deploy@v3
+      - name: Configurando o Node.js
+        uses: actions/setup-node@v4
         with:
-          token: ${{ secrets.DISCLOUD_TOKEN }}
+          node-size: 20
+
+      - name: Instalando a Discloud CLI
+        run: npm install -g @discloud/cli
+
+      - name: Enviando para a Discloud
+        run: discloud commit -t ${{ secrets.DISCLOUD_TOKEN }}
