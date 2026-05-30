@@ -3,10 +3,10 @@ name: Deploy Automatico Discloud
 on:
   push:
     branches:
-      - main
+      - main # Garanta que sua branch no VS Code é a main (se for master, mude aqui)
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+permissions:
+  contents: read
 
 jobs:
   deploy:
@@ -14,13 +14,9 @@ jobs:
 
     steps:
       - name: Pegando o codigo do GitHub
-        uses: actions/checkout@v4.2.2
-
-      - name: Configurando o Node.js
-        uses: actions/setup-node@v4.1.0
-        with:
-          node-version: 24
+        uses: actions/checkout@v4
 
       - name: Enviando para a Discloud
-        # mudei para o npx para garantir que o Linux encontre o comando
-        run: npx discloud commit -t ${{ secrets.DISCLOUD_TOKEN }}
+        uses: discloud/deploy-action@v1
+        with:
+          token: ${{ secrets.DISCLOUD_TOKEN }}
