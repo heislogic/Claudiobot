@@ -21,8 +21,6 @@ jobs:
         with:
           node-version: 24
 
-      - name: Instalando a Discloud CLI
-        run: npm install -g discloud
-
       - name: Enviando para a Discloud
-        run: discloud commit -t ${{ secrets.DISCLOUD_TOKEN }}
+        # mudei para o npx para garantir que o Linux encontre o comando
+        run: npx discloud commit -t ${{ secrets.DISCLOUD_TOKEN }}
